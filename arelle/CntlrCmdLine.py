@@ -22,6 +22,7 @@ from arelle.Locale import format_string
 from arelle.ModelFormulaObject import FormulaOptions
 from arelle import PluginManager
 from arelle.PluginManager import pluginClassMethods
+from arelle.UrlUtil import isHttpUrl
 from arelle.WebCache import proxyTuple
 import logging
 from lxml import etree
@@ -419,7 +420,8 @@ def parseAndRun(args):
         # parse and run the FILENAME
         cntlr.startLogging(logFileName=(options.logFile or "logToPrint"),
                            logFormat=(options.logFormat or "[%(messageCode)s] %(message)s - %(file)s"),
-                           logLevel=(options.logLevel or "DEBUG"))
+                           logLevel=(options.logLevel or "DEBUG"),
+                           logToBuffer=getattr(options, "logToBuffer", False)) # e.g., used by EdgarRenderer to require buffered logging
         cntlr.run(options)
         
         return cntlr
@@ -765,6 +767,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
         success = True
         # entrypointFile may be absent (if input is a POSTED zip or file name ending in .zip)
         #    or may be a | separated set of file names
+        _entryPoints = []
         if options.entrypointFile:
             _f = options.entrypointFile
             try: # may be a json list
@@ -776,11 +779,11 @@ class CntlrCmdLine(Cntlr.Cntlr):
                                   messageCode="FileNameFormatError",
                                   level=logging.ERROR)
                     success = False
-                    _entryPoints = []
-                else: # try as file names separated by '|'
-                    _entryPoints = [{"file":f} for f in (_f or '').split('|')]
-        else:
-            _entryPoints = []
+                else: # try as file names separated by '|'                    
+                    for f in (_f or '').split('|'):
+                        if not sourceZipStream and not isHttpUrl(f) and not os.path.isabs(f):
+                            f = os.path.normpath(os.path.join(os.getcwd(), f)) # make absolute normed path
+                        _entryPoints.append({"file":f})
         filesource = None # file source for all instances if not None
         if sourceZipStream:
             filesource = FileSource.openFileSource(None, self, sourceZipStream)
@@ -790,7 +793,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
         if filesource and not filesource.selection:
             if filesource.isArchive:
                 _entrypointFiles = []
-                for _archiveFile in filesource.dir:
+                for _archiveFile in (filesource.dir or ()): # .dir might be none if IOerror
                     filesource.select(_archiveFile)
                     if ModelDocument.Type.identify(filesource, filesource.url) in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL):
                         _entrypointFiles.append({"file":filesource.url})
@@ -798,7 +801,7 @@ class CntlrCmdLine(Cntlr.Cntlr):
                 _entrypointFiles = []
                 for _file in os.listdir(filesource.url):
                     _path = os.path.join(filesource.url, _file)
-                    if ModelDocument.Type.identify(filesource, _path) in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL):
+                    if os.path.isfile(_path) and ModelDocument.Type.identify(filesource, _path) in (ModelDocument.Type.INSTANCE, ModelDocument.Type.INLINEXBRL):
                         _entrypointFiles.append({"file":_path})
         for pluginXbrlMethod in pluginClassMethods("CntlrCmdLine.Filing.Start"):
             pluginXbrlMethod(self, options, filesource, _entrypointFiles, sourceZipStream=sourceZipStream, responseZipStream=responseZipStream)

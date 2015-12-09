@@ -314,6 +314,9 @@ def load(modelXbrl, uri, base=None, referringElement=None, isEntry=False, isDisc
             modelDocument.rssFeedDiscover(rootNode)
             
         if isEntry:
+            for pi in modelDocument.processingInstructions:
+                if pi.target == "arelle-unit-test":
+                    modelXbrl.arelleUnitTests[pi.get("location")] = pi.get("action")
             while modelXbrl.schemaDocsToValidate:
                 doc = modelXbrl.schemaDocsToValidate.pop()
                 XmlValidateSchema.validate(doc, doc.xmlRootElement, doc.targetNamespace) # validate schema elements
@@ -732,6 +735,19 @@ class ModelDocument:
             if productNamePattern.search(creationSoftwareComment):
                 return productKey
         return creationSoftwareComment # "Other"
+    
+    @property
+    def processingInstructions(self):
+        try:
+            return self._processingInstructions
+        except AttributeError:
+            self._processingInstructions = []
+            node = self.xmlRootElement
+            while node.getprevious() is not None:
+                node = node.getprevious()
+                if isinstance(node, etree._ProcessingInstruction):
+                    self._processingInstructions.append(node)
+            return self._processingInstructions
     
     def schemaDiscover(self, rootElement, isIncluded, namespace):
         targetNamespace = rootElement.get("targetNamespace")
